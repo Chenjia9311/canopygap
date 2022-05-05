@@ -1,0 +1,120 @@
+The code of HSTAC in Python 3.6
+
+import os
+from osgeo import  gdal
+import numpy as np
+import  matplotlib.pyplot as plt
+import cv2
+import copy
+from skimage.morphology import remove_small_objects
+from skimage.measure import regionprops,label
+import os
+
+
+def writedata2dat(data, datfile):
+    fid = open(datfile, 'wb')
+    row = data.shape[0]
+    col = data.shape[1]
+    data = np.reshape(data, row * col)
+    fid.write(data.astype(np.float32))
+    fid.close()
+    
+def readdat(datfile,row,col):
+    data = np.fromfile(datfile, dtype=np.float32)
+    data = np.reshape(data, (row, col))
+    return data
+
+def readTiff(filename):
+    dataset = gdal.Open(filename)
+    im_width = dataset.RasterXSize
+    im_height = dataset.RasterYSize
+    im_geotrans = dataset.GetGeoTransform()
+    im_proj = dataset.GetProjection()
+    im_data = dataset.ReadAsArray(0, 0, im_width, im_height)
+    # im_data = dataset.ReadAsArray(1000, 4000, 800,800)
+    del dataset
+
+    return im_data[:,:],im_proj,im_geotrans
+
+def read_rgb(filename):
+    dataset = gdal.Open(filename)
+    im_width = dataset.RasterXSize
+    im_height = dataset.RasterYSize
+    im_geotrans = dataset.GetGeoTransform()
+    im_proj = dataset.GetProjection()
+    im_data = dataset.ReadAsArray(0, 0, im_width, im_height)
+    # im_data = dataset.ReadAsArray(1000, 4000, 800, 800)
+    return im_data[0:3,:,:]
+
+
+def writetif(im_data,file,im_geotrans,wkt):
+    im_width = im_data.shape[1]
+    im_height = im_data.shape[0]
+    im_bands = 1
+    if 'int8' in im_data.dtype.name:
+        datatype = gdal.GDT_Byte
+    elif 'int16' in im_data.dtype.name:
+        datatype = gdal.GDT_UInt16
+    else:
+        datatype = gdal.GDT_Float32
+    driver = gdal.GetDriverByName('GTiff')
+    memDs = driver.Create(file, im_width, im_height, 1, datatype)
+    memDs.SetProjection(wkt)
+    memDs.SetGeoTransform(im_geotrans)
+    if im_bands == 1:
+        memDs.GetRasterBand(1).WriteArray(im_data)
+        memDs.GetRasterBand(1).SetNoDataValue(-999)
+
+filename='green band.tif'
+demfile='dsmcilp.tif'
+GLCMfile='glcm_mean.tif'
+specfile='vdvi.tif'
+outpath='F:/PHD-data/202105-second paper/tiantong_test'
+
+glcm_thresolds=[7,7.5,8,8.5,9,9.5,10,10.5,11,11.5,12]
+
+green band_thresolds=[65,67,69,70,71,73,75]
+
+
+print("Cycle through all GLCM discrimination thresholds and green band discrimination thresholds ")
+for glcm_thresold in glcm_thresolds:
+    for green band _thresold in green band _thresolds:
+VDVIdata,im_proj,im_geotrans=readTiff(specfile)
+        demdata,im_proj,im_geotrans=readTiff(demfile)
+        glcmdata,im_proj,im_geotrans=readTiff(GLCMfile)
+        greendata,im_proj,im_geotrans=readTiff(filename)
+
+        row=glcmdata.shape[0]
+        col=glcmdata.shape[1]
+
+        print("extract the approximate area where the bare ground are located ")
+        b=np.zeros((row,col))+1
+        
+        
+        # 1360/26 is the line number on 1m, 1360 is the line number of the native resolution, here you can write as much as you actually write on the 1m resolution.
+        
+        b[int(1360/26):int(1610/26),int(744/26):int(1076/26)]=VDVIdata[int(1360/26):int(1610/26),int(744/26):int(1076/26)]
+        b[int(9308/26):int(10226/26),int(7561/26):int(8811/26)]=VDVIdata[int(9308/26):int(10226/26),int(7561/26):int(8811/26)]
+        print("bare ground identification in selected area")
+        index vdvi=b<0.1
+        mask=np.zeros((VDVIdata.shape[0],VDVIdata.shape[1]))
+        print("Carry out preliminary identification of forest canopy gaps ")
+        index=(glcmdata<glcm_thresold)&(VDVIdata<vdvi_thresold)
+        mask[index]=1
+
+        print("Perform GMM identification")
+        writedata2dat(VDVIdata,'VDVI.dat')
+        writedata2dat(demdata, 'dem.dat')
+        cmd='gmm.exe VDVI.dat dem.dat gmmindex.dat '+str(row)+' '+str(col)
+        gmmindex=readdat('gmmindex.dat',row,col)    
+        mask[gmmindex==1] = 0
+
+        print("Add identified bare ground areas ")
+        mask[indexvdvi]=1
+        print("Output result tiff file ")
+        writetif(mask,outpath+'mask_'+'glcm_'+str(glcm_thresold)+'vdvi_'+str(vdvi_thresold)+'.tif',im_geotrans,im_proj)
+        print("Output tiff file for removing small plaques ")
+        labels = label(mask, connectivity=2)
+        labels = remove_small_objects(labels, connectivity=2, min_size=5)
+        labels[labels>0]=255
+               writetif(labels,outpath+'mask_remove_'+'glcm_'+str(glcm_thresold)+'vdvi_'+str(vdvi_thresold)+'.tif',im_geotrans,im_proj)
